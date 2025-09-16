@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-# Video-Splitter
-A simple Python command-line tool that extracts multiple clips from a video file based on timestamp ranges and combines them into a single output video.
-=======
 # Video Splitter
 
-A simple Python tool that extracts multiple clips from a video file based on timestamp ranges and combines them into a single output video.
+A simple Python command-line tool that extracts multiple clips from a video file based on timestamp ranges and combines them into a single output video.
 
 ## Features
 
@@ -121,7 +117,7 @@ except Exception as e:
 
 - **`input_video_path`** (str): Path to your input video file
 - **`timestamp_ranges`** (List[Tuple[float, float]]): List of (start_time, end_time) pairs in seconds
-- **`output_path`** (str, optional): Output file path (default: "output_combined.mp4")
+- **`output_path`** (str): Output file path for the combined video
 
 **Returns:** Path to the created output video file
 
@@ -192,4 +188,3 @@ This project is open source and available under the MIT License.
 ## Contributing
 
 Feel free to submit issues, fork the repository, and create pull requests for any improvements.
->>>>>>> 0cb138d (init commit)
