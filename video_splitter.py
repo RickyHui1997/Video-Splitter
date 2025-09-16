@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Video Splitter - A simple tool to extract clips from a video and combine them into one output.
 
@@ -22,6 +21,63 @@ from typing import List, Tuple
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 
+def validate_input_path(input_path: str) -> None:
+    """Validate input video file path."""
+    if not input_path or not input_path.strip():
+        raise ValueError("Input video path cannot be empty")
+    
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Input video file not found: {input_path}")
+    
+    if not os.path.isfile(input_path):
+        raise ValueError(f"Input path is not a file: {input_path}")
+    
+    if not os.access(input_path, os.R_OK):
+        raise PermissionError(f"No read permission for input file: {input_path}")
+    
+    # Check if it's likely a video file
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.3gp'}
+    file_ext = os.path.splitext(input_path)[1].lower()
+    if file_ext not in video_extensions:
+        print(f"⚠️  Warning: Input file extension '{file_ext}' is not a common video format")
+    
+    # Check file size (warn if very large or very small)
+    file_size = os.path.getsize(input_path)
+    if file_size == 0:
+        raise ValueError(f"Input video file is empty: {input_path}")
+    elif file_size < 1024:  # Less than 1KB
+        print(f"⚠️  Warning: Input file is very small ({file_size} bytes). May not be a valid video.")
+    elif file_size > 5 * 1024 * 1024 * 1024:  # 5GB
+        print(f"⚠️  Warning: Large input file ({file_size / (1024**3):.1f}GB). Processing may be slow.")
+
+
+def validate_output_path(output_path: str) -> None:
+    """Validate output video file path."""
+    if not output_path or not output_path.strip():
+        raise ValueError("Output video path cannot be empty")
+    
+    # Get directory of output file
+    output_dir = os.path.dirname(os.path.abspath(output_path))
+    
+    # Check if directory exists
+    if not os.path.exists(output_dir):
+        raise FileNotFoundError(f"Output directory does not exist: {output_dir}")
+    
+    # Check if directory is writable
+    if not os.access(output_dir, os.W_OK):
+        raise PermissionError(f"No write permission for output directory: {output_dir}")
+    
+    # Check if output file already exists (warn but don't fail)
+    if os.path.exists(output_path):
+        print(f"⚠️  Warning: Output file already exists and will be overwritten: {output_path}")
+    
+    # Validate file extension
+    valid_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'}
+    file_ext = os.path.splitext(output_path)[1].lower()
+    if file_ext not in valid_extensions:
+        print(f"⚠️  Warning: Unusual output file extension '{file_ext}'. Recommended: {', '.join(valid_extensions)}")
+
+
 def split_and_combine_video(
     input_video_path: str,
     timestamp_ranges: List[Tuple[float, float]],
@@ -39,24 +95,24 @@ def split_and_combine_video(
         str: Path to the created output video file
         
     Raises:
-        FileNotFoundError: If the input video file doesn't exist
-        ValueError: If timestamp ranges are invalid
+        FileNotFoundError: If the input video file doesn't exist or output directory doesn't exist
+        ValueError: If timestamp ranges or paths are invalid
+        PermissionError: If no read/write permissions
         Exception: For other video processing errors
     """
     
-    # Validate input file exists
-    if not os.path.exists(input_video_path):
-        raise FileNotFoundError(f"Input video file not found: {input_video_path}")
+    # Validate input and output paths
+    validate_input_path(input_video_path)
+    validate_output_path(output_path)
     
     # Validate timestamp ranges
     if not timestamp_ranges:
         raise ValueError("At least one timestamp range must be provided")
     
+    # Basic type validation (detailed validation done in parse_timestamp_ranges for CLI)
     for i, (start, end) in enumerate(timestamp_ranges):
-        if start < 0 or end < 0:
-            raise ValueError(f"Timestamp range {i+1}: Times must be non-negative")
-        if start >= end:
-            raise ValueError(f"Timestamp range {i+1}: Start time must be less than end time")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            raise ValueError(f"Timestamp range {i+1}: Times must be numbers")
     
     try:
         # Load the input video
@@ -126,8 +182,15 @@ def parse_timestamp_ranges(ranges_str: str) -> List[Tuple[float, float]]:
     Raises:
         ValueError: If the format is invalid
     """
+    # Input validation
+    if not isinstance(ranges_str, str):
+        raise ValueError("Timestamp ranges must be a string")
+    
     # Remove whitespace and validate basic format
     ranges_str = ranges_str.strip()
+    
+    if not ranges_str:
+        raise ValueError("Timestamp ranges cannot be empty")
     
     if not ranges_str.startswith('[') or not ranges_str.endswith(']'):
         raise ValueError("Timestamp ranges must be enclosed in square brackets: [(start,end), ...]")
@@ -136,24 +199,41 @@ def parse_timestamp_ranges(ranges_str: str) -> List[Tuple[float, float]]:
     inner = ranges_str[1:-1].strip()
     
     if not inner:
-        raise ValueError("At least one timestamp range must be provided")
+        raise ValueError("At least one timestamp range must be provided inside brackets")
     
-    # Find all (start,end) patterns
-    pattern = r'\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)'
+    # Enhanced pattern to match numbers (including integers and floats)
+    # Supports: 123, 123.45, .5, but not just "." or "-"
+    pattern = r'\(\s*(-?(?:[0-9]+\.?[0-9]*|\.[0-9]+))\s*,\s*(-?(?:[0-9]+\.?[0-9]*|\.[0-9]+))\s*\)'
     matches = re.findall(pattern, inner)
     
     if not matches:
-        raise ValueError("Invalid timestamp format. Use: [(start,end), (start,end), ...] with numbers only")
+        raise ValueError("Invalid timestamp format. Use: [(start,end), (start,end), ...] with valid numbers")
     
-    # Convert to tuples of floats
+    # Check if we found all expected tuples (no malformed ones)
+    # Count opening parentheses to verify all tuples were parsed
+    open_parens = inner.count('(')
+    if len(matches) != open_parens:
+        raise ValueError("Malformed timestamp ranges. Each range must be in format (start,end)")
+    
+    # Convert to tuples of floats and validate values
     timestamp_ranges = []
-    for start_str, end_str in matches:
+    for i, (start_str, end_str) in enumerate(matches):
         try:
             start = float(start_str)
             end = float(end_str)
+            
+            # Validate individual timestamp values
+            if start < 0:
+                raise ValueError(f"Range {i+1}: Start time ({start}) cannot be negative")
+            if end < 0:
+                raise ValueError(f"Range {i+1}: End time ({end}) cannot be negative")
+            if start >= end:
+                raise ValueError(f"Range {i+1}: Start time ({start}) must be less than end time ({end})")
+            
             timestamp_ranges.append((start, end))
-        except ValueError:
-            raise ValueError(f"Invalid timestamp values: ({start_str}, {end_str}). Use numbers only.")
+            
+        except ValueError as e:
+            raise ValueError(f"Range {i+1}: Invalid timestamp values ({start_str}, {end_str}). Must be valid numbers.")
     
     return timestamp_ranges
 
@@ -220,8 +300,22 @@ Note: Timestamp ranges should be in seconds and enclosed in quotes.
         print("\nExample usage:")
         print('python video_splitter.py input.mp4 "[(0,10), (20,30), (45,60)]" output.mp4')
         sys.exit(1)
+    except FileNotFoundError as e:
+        print(f"\n❌ File not found: {e}")
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"\n❌ Permission denied: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print(f"\n⚠️  Operation cancelled by user")
+        sys.exit(130)
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n❌ Unexpected error: {e}")
+        print("This may be due to:")
+        print("- Corrupted video file")
+        print("- Unsupported video format")
+        print("- Insufficient system resources")
+        print("- MoviePy processing error")
         sys.exit(1)
 
 
